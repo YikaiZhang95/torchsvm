@@ -8,7 +8,7 @@ with open("requirements.txt") as f:
 
 setup(
     name="torchsvm",
-    version="0.0.1",
+    version="0.1.1",
     description="""torchsvm, a PyTorch-based library that trains kernel SVMs and other large-margin classifiers 
                    with exact leave-one-out cross-validation (LOOCV) error computation. Conventional SVM solvers 
                    often face scalability and efficiency challenges, especially on large datasets or when multiple 
