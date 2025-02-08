@@ -1,4 +1,5 @@
 # torchsvm
+![img](https://release-badges-generator.vercel.app/api/releases.svg?user=YikaiZhang95&repo=torchsvm&gradient=0000ff,8bd1fa)
 
 This is a PyTorch-based package to solve kernel SVM with GPU.
 
