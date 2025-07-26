@@ -26,18 +26,26 @@ pip install torchsvm
 
 
 ## Quick start
+Import necessary libraries and functions:
+
+```python
+from torchsvm.cvksvm import cvksvm
+from torchsvm.functions import *
+import torch
+import numpy
+```
 
 The usages are similar with `scikit-learn`:
 
 ```python
-model = cvksvm(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, foldid=foldid, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
+model = cvksvm(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
 model.fit()
 ```
 
 ## Usage
 
 ### Generate simulation data
-`torchsvm` provides a simulation data generation function to test functions in the library:
+`functions` provides a simulation data generation function, `data_gen`, to generate data from a mixture of Gaussian models. `functions` also provides kernel operations like `rbf_kernel` and `kernelMult`, as well as data processing functions such as `standardize`.
 
 ```python
 # Sample data
@@ -62,7 +70,6 @@ sig = sigest(X_train)
 Kmat = rbf_kernel(X_train, sig)
 ```
 
-
 ### Basic operation
 
 `torchsvm` mainly provides `cvksvm` to tune kernel SVM fast with GPU acceleration and compute exact leave-one-out cross-validation (LOOCV) errors if needed.
@@ -71,6 +78,54 @@ Kmat = rbf_kernel(X_train, sig)
 model = cvksvm(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, foldid=foldid, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
 model.fit()
 ```
+
+```python
+### Tune parameter
+cv_mis = model.cv(model.pred, y_train).numpy()
+best_ind = numpy.argmin(cv_mis)
+best_ind
+
+### Test Error and objective value
+Kmat = Kmat.double()
+alpmat = model.alpmat.to('cpu')
+intcpt = alpmat[0,best_ind]
+alp = alpmat[1:,best_ind]
+ka = torch.mv(Kmat, alp)
+aka = torch.dot(alp, ka)
+obj_magic = model.objfun(intcpt, aka, ka, y_train, ulam[best_ind], nn)
+
+Kmat_new = kernelMult(X_test, X_train, sig)
+Kmat_new = Kmat_new.double()
+
+result = torch.mv(Kmat_new, alpmat[1:,best_ind]) + alpmat[0, best_ind]
+
+ypred = torch.where(result > 0, torch.tensor(1), torch.tensor(-1))
+
+torch.mean((ypred == y_test).float())
+```
+
+### Real data
+
+`torchsvm` works well with `sklearn` datasets. We need to convert these datasets to `torch.tensor` with $y=1 \text{ or} -1$.
+
+```python 
+from sklearn.datasets import make_moons
+
+# Generate non-linear dataset
+X, y = make_moons(n_samples=300, noise=0.2, random_state=42)
+
+X = torch.from_numpy(X).float()
+y = torch.from_numpy(y).float()
+y = 2 * y - 1
+
+sig = sigest(X)
+Kmat = rbf_kernel(X, sig)
+
+model = cvksvm(Kmat=Kmat, y=y, nlam=nlam, ulam=ulam, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
+model.fit()
+```
+
+### Extensions to large-margin classifiers 
 It also provides applications for other large-margin classifiers:
 
 1. Kernel logistic regression
@@ -78,16 +133,11 @@ It also provides applications for other large-margin classifiers:
     model = cvklogit(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, foldid=foldid, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
     model.fit()
     ```
-2. Kernel SVM with Huber loss
+2. Kernel distance weighted discrimination
     ```python
-    model = cvkhuber(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, foldid=foldid, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
+    model = cvkdwd(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, foldid=foldid, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
     model.fit()
     ```
-3. Kernel squared SVM
-   ```python
-    model = cvksqsvm(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, foldid=foldid, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
-    model.fit()
-    ```  
 
 
 ## Getting help
