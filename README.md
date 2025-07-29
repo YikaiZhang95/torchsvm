@@ -13,7 +13,16 @@ This is a PyTorch-based package to solve kernel SVM with GPU.
 
 ## Introduction
 
-torchsvm, a PyTorch-based library that trains kernel SVMs and other large-margin classifiers with exact leave-one-out cross-validation (LOOCV) error computation. Conventional SVM solvers often face scalability and efficiency challenges, especially on large datasets or when multiple cross-validation runs are required. torchsvm computes LOOCV at the same cost as training a single SVM while boosting speed and scalability via CUDA-accelerated matrix operations. Benchmark experiments indicate that TorchKSVM outperforms existing kernel SVM solvers in efficiency and speed. 
+`torchsvm`, a PyTorch-based library that trains kernel SVMs and other large-margin classifiers with exact leave-one-out cross-validation (LOOCV) error computation. Conventional SVM solvers often face scalability and efficiency challenges, especially on large datasets or when multiple cross-validation runs are required. torchsvm computes LOOCV at the same cost as training a single SVM while boosting speed and scalability via CUDA-accelerated matrix operations. Benchmark experiments indicate that TorchKSVM outperforms existing kernel SVM solvers in efficiency and speed. This document shows how to use the `torchsvm` package to fit kernel SVM.
+
+When dealing with low-dimensional problems or more complex scenarios, such as requiring non-linear decision boundaries or higher accuracy, kernel SVMs can be formulated using the kernel method within a reproducing kernel Hilbert space (RKHS). For consistency, we adopt the same notation introduced in the high-dimensional case in Chapter One.
+
+Given a random sample $\\{y_i, x_i\\}_{i=1}^n$, the kernel SVM can be formulated as a function estimation problem:
+
+![kernel SVM formulation](https://latex.codecogs.com/svg.image?\dpi{130}&space;\min_{f&space;\in&space;\mathcal{H}_K}&space;\left[&space;\frac{1}{n}&space;\sum_{i=1}^n&space;\left(&space;1&space;-&space;y_i&space;f(\mathbf{x}_i)&space;\right)_{+}&space;&plus;&space;\lambda&space;\|f\|_{\mathcal{H}_K}^2&space;\right])
+
+where ![norm](https://latex.codecogs.com/svg.image?\dpi{120}&space;\left\|f\right\|^2_{\mathcal{H}_K}) is the RKHS norm that acts as a regularizer, and \(\lambda > 0\) is a tuning parameter.
+
 
 
 ## Installation
