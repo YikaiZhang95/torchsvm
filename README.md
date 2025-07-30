@@ -21,8 +21,17 @@ Given a random sample $\\{y_i, x_i\\}_{i=1}^n$, the kernel SVM can be formulated
 
 ![kernel SVM formulation](https://latex.codecogs.com/svg.image?\dpi{130}&space;\min_{f&space;\in&space;\mathcal{H}_K}&space;\left[&space;\frac{1}{n}&space;\sum_{i=1}^n&space;\left(&space;1&space;-&space;y_i&space;f(\mathbf{x}_i)&space;\right)_{+}&space;&plus;&space;\lambda&space;\|f\|_{\mathcal{H}_K}^2&space;\right])
 
-where ![norm](https://latex.codecogs.com/svg.image?\dpi{120}&space;\left\|f\right\|^2_{\mathcal{H}_K}) is the RKHS norm that acts as a regularizer, and \(\lambda > 0\) is a tuning parameter.
+where ![norm](https://latex.codecogs.com/svg.image?\dpi{120}&space;\left\|f\right\|^2_{\mathcal{H}_K}) is the RKHS norm that acts as a regularizer, and $\lambda > 0$ is a tuning parameter.
 
+According to the representer theorem for reproducing kernels (Wahba, 1990), the solution to our problem takes the form:
+
+![f(x) formula](https://latex.codecogs.com/svg.image?\dpi{130}&space;f(\mathbf{x})&space;=&space;\sum_{i=1}^n&space;\alpha_i^{\mathrm{SVM}}&space;K\left(\mathbf{x}_i,&space;\mathbf{x}\right))
+
+The coefficients $\alpha^{SVM}$ are obtained by solving the optimization problem:
+
+![alpha optimization](https://latex.codecogs.com/svg.image?\dpi{130}&space;\boldsymbol{\alpha}^{\mathrm{SVM}}&space;=&space;\arg\min_{\boldsymbol{\alpha}&space;\in&space;\mathbb{R}^n}&space;\left[&space;\frac{1}{n}&space;\sum_{i=1}^n&space;\left(1&space;-&space;y_i&space;\mathbf{K}_i^{\top}&space;\boldsymbol{\alpha}&space;\right)_{+}&space;&plus;&space;\lambda&space;\boldsymbol{\alpha}^\top&space;\mathbf{K}&space;\boldsymbol{\alpha}&space;\right])
+
+where $\mathbf{K}$ is the kernel matrix.
 
 
 ## Installation
