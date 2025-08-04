@@ -6,13 +6,163 @@ import time
 from .functions import *
 
 class cvkdwd:
-    def __init__(self, Kmat, y, nlam, ulam, foldid, nfolds = 5, eps=1e-5, maxit=1000, gamma=1.0, KKTeps=1e-3, KKTeps2=1e-3, device='cuda'):
+    """
+    Kernel DWD with Regularization and Acceleration.
+
+    This function initializes the optimization process for a kernel DWD model,
+    supporting advanced features like GPU acceleration and iterative projection methods
+    for large-scale data.
+
+    Parameters
+    ----------
+    Kmat : ndarray or tensor
+        The kernel matrix of shape (n_samples, n_samples).
+
+    y : ndarray or tensor
+        Target labels for each sample, of shape (n_samples,). Typically, -1 or 1.
+
+    nlam : int
+        The number of regularization parameters to consider in the optimization.
+
+    ulam : ndarray or tensor
+        User-specified regularization parameters, of shape (nlam,).
+
+    foldid : ndarray, default=None
+        Array indicating the fold assignment for cross-validation. Each element is an 
+        integer corresponding to a fold.
+
+    nfolds : int, default=5
+        The number of cross-validation folds to use.
+
+    eps : float, default=1e-5
+        Tolerance for convergence in the optimization.
+
+    maxit : int, default=1000
+        Maximum number of iterations allowed for the optimization process.
+
+    gamma : float, default=1.0
+        Regularization parameter for kernel methods, controlling the trade-off between 
+        margin width and misclassification.
+
+    KKTeps : float, default=1e-3
+        Tolerance for KKT conditions in the primary optimization problem.
+
+    KKTeps2 : float, default=1e-3
+        Tolerance for KKT conditions in secondary checks.
+
+    device : {'cuda', 'cpu'}, default='cuda'
+        Device to perform computations on. Default is GPU ('cuda') for improved performance.
+
+    Attributes
+    ----------
+    self.alpmat : ndarray or tensor
+        Matrix of optimized alpha values after fitting the data, of shape (n_samples, nlam).
+
+    self.npass : int
+        Number of passes made over the data during the optimization.
+
+    self.cvnpass : int
+        Number of passes made during cross-validation.
+
+    self.jerr : int
+        Error flag to indicate any issues during computation (0 for success, non-zero for errors).
+
+    self.pred : ndarray or tensor
+        Predicted values based on the optimization, of shape (n_samples,).
+
+    Notes
+    -----
+    This implementation is designed for large-scale data problems and leverages GPU
+    acceleration for improved computational efficiency. Regularization is controlled
+    through multiple hyperparameters, allowing fine-tuned trade-offs between accuracy
+    and computational cost.
+
+    Examples
+    --------
+    >>> from torchsvm.cvkdwd import cvkdwd
+    >>> from torchsvm.functions import *
+    >>> import torch
+    >>> import numpy
+    >>> nn = 1000 # Number of samples
+    >>> nm = 5   # Number of clusters per class
+    >>> pp = 10  # Number of features
+    >>> p1 = p2 = pp // 2    # Number of positive/negative centers
+    >>> mu = 2.0  # Mean shift
+    >>> ro = 3  # Standard deviation for normal distribution
+    >>> sdn = 42  # Seed for reproducibility
+
+    >>> nlam = 50
+    >>> torch.manual_seed(sdn)
+    >>> ulam = torch.logspace(3, -3, steps=nlam)
+
+    >>> X_train, y_train, means_train = data_gen(nn, nm, pp, p1, p2, mu, ro, sdn)
+    >>> X_test, y_test, means_test = data_gen(nn // 10, nm, pp, p1, p2, mu, ro, sdn)
+    >>> X_train = standardize(X_train)
+    >>> X_test = standardize(X_test)
+
+    >>> sig = sigest(X_train)
+    >>> Kmat = rbf_kernel(X_train, sig)
+
+    >>> torch.manual_seed(sdn)
+    >>> nfolds = 10
+    >>> if nfolds == nn:
+    >>>     foldid = torch.arange(nn) # Each row gets its own fold ID
+    >>> else:
+    >>>     # Randomly assign fold IDs across the rows
+    >>>     # foldid = torch.tensor(np.random.permutation(np.repeat(np.arange(1, nfolds + 1), nn // nfolds + 1)[:nn]))
+    >>>     foldid = torch.randperm(nn) % nfolds + 1
+    >>> model = cvkdwd(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, nfolds=nfolds, eps=1e-5, maxit=100000, gamma=1e-8, device='cuda')
+    >>> model.fit()
+    """
+    def __init__(self, Kmat, y, nlam, ulam, foldid=None, nfolds = 5, eps=1e-5, maxit=1000, gamma=1.0, KKTeps=1e-3, KKTeps2=1e-3, device='cuda'):
         self.device = device
-        self.Kmat = Kmat.double().to(self.device)
-        self.y = y.double().to(self.device)
+        self.nobs = Kmat.shape[0]
+
+        # --- Check Kmat ---
+        if not isinstance(Kmat, torch.Tensor):
+            raise TypeError("Kmat must be a torch.Tensor")
+        Kmat = Kmat.double().to(self.device)
+        self.Kmat = Kmat
+
+        if not isinstance(y, torch.Tensor):
+            raise TypeError("y must be a torch.Tensor")
+        y = y.double().to(self.device)
+        
+        # --- Label check ---
+        unique_labels = torch.unique(y)
+        if unique_labels.numel() > 2:
+            raise ValueError(f"Multi-class detected: labels = {unique_labels.tolist()}. Only -1 and 1 allowed.")
+        if not torch.all((unique_labels == -1) | (unique_labels == 1)):
+            raise ValueError(f"Invalid labels: {unique_labels.tolist()}. Must be only -1 and 1.")
+        self.y = y
+
+        # --- Check ulam ---
+        if not isinstance(ulam, torch.Tensor):
+            raise TypeError("ulam must be a torch.Tensor")
+        ulam = ulam.double().to(self.device)
+
+        # --- Check foldid ---
+        if foldid is not None:
+            if not isinstance(foldid, torch.Tensor):
+                raise TypeError("foldid must be a torch.Tensor")
+            foldid = foldid.to(self.device)
+        else:
+            if nfolds == self.nobs:
+                foldid = torch.arange(self.nobs) # Each row gets its own fold ID
+            else:
+                # Randomly assign fold IDs across the rows
+                # foldid = torch.tensor(np.random.permutation(np.repeat(np.arange(1, nfolds + 1), nn // nfolds + 1)[:nn]))
+                foldid = torch.randperm(self.nobs) % nfolds + 1
+            foldid = foldid.to(self.device)    
+
+        # --- Shape check ---
+        if Kmat.shape[0] != Kmat.shape[1]:
+            raise ValueError("Kmat must be a square matrix")
+        if Kmat.shape[0] != y.shape[0]:
+            raise ValueError("Kmat and y size mismatch")
+
         # self.Kmat = None
         # self.y = None
-        self.nobs = Kmat.shape[0]
         self.nlam = nlam
         self.ulam = ulam.double()
         self.eps = eps
@@ -130,11 +280,16 @@ class cvkdwd:
             dif_step = oldalpvec - alpvec
             ka = torch.mv(Kmat, alpvec[1:])
             aka = torch.dot(ka, alpvec[1:])
-            obj_value = self.objfun(alpvec[0], aka, ka, y, al, nobs)
+            if self.device == 'cuda':
+                    ka_cpu = ka.to('cpu')
+                    aka_cpu = aka.to('cpu')
+                    y_cpu = y.to('cpu')
+                    alpvec0_cpu = alpvec[0].to('cpu')
+            obj_value = self.objfun(alpvec0_cpu, aka_cpu, ka_cpu, y_cpu, al, nobs)
             # eps_float64 = np.finfo(np.float64).eps
             # optimal_intercept = minimize_scalar(self.objfun, args=(aka, ka, y, al, nobs), bracket=(-100.0, 100.0), method="brent")
             # obj_value_new = self.objfun(optimal_intercept.x, aka, ka, y, al, nobs)
-            golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka, aka, y, al)
+            golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka_cpu, aka_cpu, y_cpu, al)
             int_new = golden_s[0]
             obj_value_new = golden_s[1]
             if obj_value_new < obj_value:
@@ -165,11 +320,11 @@ class cvkdwd:
                 loor = r.clone() # Initial residuals
                 looalp = alpvec.clone() # Initial alphas
 
-                lpinv = 1.0 / (eigens + 2.0 * float(nobs) * minv * al)
-                lpUsum = lpinv * Usum
-                vvec = torch.mv(Umat, eigens * lpUsum)
-                svec = torch.mv(Umat, lpUsum)
-                gval= 1.0 / (nobs - vvec.sum())
+                # lpinv = 1.0 / (eigens + 2.0 * float(nobs) * minv * al)
+                # lpUsum = lpinv * Usum
+                # vvec = torch.mv(Umat, eigens * lpUsum)
+                # svec = torch.mv(Umat, lpUsum)
+                # gval= 1.0 / (nobs - vvec.sum())
                 
 
                 # Compute residual r
@@ -218,10 +373,17 @@ class cvkdwd:
                     break
                 ka = torch.mv(Kmat, looalp[1:])
                 aka = torch.dot(ka, looalp[1:])
-                obj_value = self.objfun(looalp[0], aka, ka, yn, al, nobs)
+
+                if self.device == 'cuda':
+                        ka_cpu = ka.to('cpu')
+                        aka_cpu = aka.to('cpu')
+                        yn_cpu = yn.to('cpu')
+                        looalp0_cpu = looalp[0].to('cpu')
+
+                obj_value = self.objfun(looalp0_cpu, aka_cpu, ka_cpu, yn_cpu, al, nobs)
                 # optimal_intercept = minimize_scalar(self.objfun, args=(aka, ka, yn, al, nobs), bracket=(-100.0, 100.0), method="brent")
                 # obj_value_new = self.objfun(optimal_intercept.x, aka, ka, yn, al, nobs)
-                golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka, aka, yn, al)
+                golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka_cpu, aka_cpu, yn_cpu, al)
                 int_new = golden_s[0]
                 obj_value_new = golden_s[1]
                 if obj_value_new < obj_value:
@@ -281,20 +443,6 @@ class cvkdwd:
 
         
     def objfun(self, intcpt, aka, ka, y, lam, nobs):
-        """
-        Compute the objective function value for SVM.
-
-        Parameters:
-        - intcpt (float): Intercept term.
-        - aka (torch.Tensor): Regularization term (alpha * K * alpha).
-        - ka (torch.Tensor): Kernel matrix dot alpha vector (K * alpha).
-        - y (torch.Tensor): Labels vector of shape (nobs,).
-        - lam (float): Regularization parameter.
-        - nobs (int): Number of observations.
-
-        Returns:
-        - objval (float): Objective function value.
-        """
         # Initialize xi (hinge loss terms)
         xi = torch.zeros(nobs, dtype=torch.double)
 
@@ -309,22 +457,6 @@ class cvkdwd:
         return objval
 
     def golden_section_search(self, lmin, lmax, nobs, ka, aka, y, lam):
-        """
-        Optimize the intercept using golden section search (Brent's method).
-
-        Parameters:
-        - lmin (float): Lower bound for the search interval.
-        - lmax (float): Upper bound for the search interval.
-        - nobs (int): Number of observations.
-        - ka (torch.Tensor): Kernel matrix dot alpha vector (K * alpha).
-        - aka (float): Regularization term (alpha * K * alpha).
-        - y (torch.Tensor): Labels vector of shape (nobs,).
-        - lam (float): Regularization parameter.
-
-        Returns:
-        - lhat (float): Optimized intercept value.
-        - fx (float): Objective function value at the optimized intercept.
-        """
         eps = torch.tensor(torch.finfo(torch.float64).eps)
         tol = eps ** 0.25
         tol1 = eps + 1.0
