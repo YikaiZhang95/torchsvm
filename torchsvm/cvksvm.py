@@ -27,7 +27,7 @@ class cvksvm:
     ulam : ndarray or tensor
         User-specified regularization parameters, of shape (nlam,).
 
-    foldid : ndarray
+    foldid : ndarray, default=None
         Array indicating the fold assignment for cross-validation. Each element is an 
         integer corresponding to a fold.
 
@@ -88,21 +88,91 @@ class cvksvm:
 
     Examples
     --------
-    >>> from torchksvm import cvksvm
-    >>> import numpy as np
-    >>> Kmat = np.random.rand(100, 100)
-    >>> y = np.random.choice([-1, 1], size=100)
-    >>> model = cvksvm(Kmat, y, nlam=50, ulam=np.logspace(-4, 4, 50), foldid=np.random.randint(1, 6, size=100))
+    >>> from torchsvm.cvksvm import cvksvm
+    >>> from torchsvm.functions import *
+    >>> import torch
+    >>> import numpy
+    >>> nn = 1000 # Number of samples
+    >>> nm = 5   # Number of clusters per class
+    >>> pp = 10  # Number of features
+    >>> p1 = p2 = pp // 2    # Number of positive/negative centers
+    >>> mu = 2.0  # Mean shift
+    >>> ro = 3  # Standard deviation for normal distribution
+    >>> sdn = 42  # Seed for reproducibility
+
+    >>> nlam = 50
+    >>> torch.manual_seed(sdn)
+    >>> ulam = torch.logspace(3, -3, steps=nlam)
+
+    >>> X_train, y_train, means_train = data_gen(nn, nm, pp, p1, p2, mu, ro, sdn)
+    >>> X_test, y_test, means_test = data_gen(nn // 10, nm, pp, p1, p2, mu, ro, sdn)
+    >>> X_train = standardize(X_train)
+    >>> X_test = standardize(X_test)
+
+    >>> sig = sigest(X_train)
+    >>> Kmat = rbf_kernel(X_train, sig)
+
+    >>> torch.manual_seed(sdn)
+    >>> nfolds = 10
+    >>> if nfolds == nn:
+    >>>     foldid = torch.arange(nn) # Each row gets its own fold ID
+    >>> else:
+    >>>     # Randomly assign fold IDs across the rows
+    >>>     # foldid = torch.tensor(np.random.permutation(np.repeat(np.arange(1, nfolds + 1), nn // nfolds + 1)[:nn]))
+    >>>     foldid = torch.randperm(nn) % nfolds + 1
+    >>> model = cvksvm(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, nfolds=nfolds, eps=1e-5, maxit=100000, gamma=1e-8, is_exact=0, device='cuda')
     >>> model.fit()
     """
 
-    def __init__(self, Kmat, y, nlam, ulam, foldid, nfolds = 5, eps=1e-5, maxit=1000, gamma=1.0, is_exact=0, delta_len=8, mproj=10, KKTeps=1e-3, KKTeps2=1e-3, device='cuda'):
+    def __init__(self, Kmat, y, nlam, ulam, foldid = None, nfolds = 5, eps=1e-5, maxit=1000, gamma=1.0, is_exact=0, delta_len=8, mproj=10, KKTeps=1e-3, KKTeps2=1e-3, device='cuda'):
         self.device = device
-        self.Kmat = Kmat.double().to(self.device)
-        self.y = y.double().to(self.device)
+        self.nobs = Kmat.shape[0]
+
+        # --- Check Kmat ---
+        if not isinstance(Kmat, torch.Tensor):
+            raise TypeError("Kmat must be a torch.Tensor")
+        Kmat = Kmat.double().to(self.device)
+        self.Kmat = Kmat
+
+        if not isinstance(y, torch.Tensor):
+            raise TypeError("y must be a torch.Tensor")
+        y = y.double().to(self.device)
+        
+        # --- Label check ---
+        unique_labels = torch.unique(y)
+        if unique_labels.numel() > 2:
+            raise ValueError(f"Multi-class detected: labels = {unique_labels.tolist()}. Only -1 and 1 allowed.")
+        if not torch.all((unique_labels == -1) | (unique_labels == 1)):
+            raise ValueError(f"Invalid labels: {unique_labels.tolist()}. Must be only -1 and 1.")
+        self.y = y
+
+        # --- Check ulam ---
+        if not isinstance(ulam, torch.Tensor):
+            raise TypeError("ulam must be a torch.Tensor")
+        ulam = ulam.double().to(self.device)
+
+        # --- Check foldid ---
+        if foldid is not None:
+            if not isinstance(foldid, torch.Tensor):
+                raise TypeError("foldid must be a torch.Tensor")
+            foldid = foldid.to(self.device)
+        else:
+            if nfolds == self.nobs:
+                foldid = torch.arange(self.nobs) # Each row gets its own fold ID
+            else:
+                # Randomly assign fold IDs across the rows
+                # foldid = torch.tensor(np.random.permutation(np.repeat(np.arange(1, nfolds + 1), nn // nfolds + 1)[:nn]))
+                foldid = torch.randperm(self.nobs) % nfolds + 1
+            foldid = foldid.to(self.device)    
+
+        # --- Shape check ---
+        if Kmat.shape[0] != Kmat.shape[1]:
+            raise ValueError("Kmat must be a square matrix")
+        if Kmat.shape[0] != y.shape[0]:
+            raise ValueError("Kmat and y size mismatch")
         # self.Kmat = None
         # self.y = None
-        self.nobs = Kmat.shape[0]
+        
         self.nlam = nlam
         self.ulam = ulam.double()
         self.eps = eps
@@ -233,11 +303,16 @@ class cvksvm:
                 dif_step = oldalpvec - alpvec
                 ka = torch.mv(Kmat, alpvec[1:])
                 aka = torch.dot(ka, alpvec[1:])
-                obj_value = self.objfun(alpvec[0], aka, ka, y, al, nobs)
+                if self.device == 'cuda':
+                    ka_cpu = ka.to('cpu')
+                    aka_cpu = aka.to('cpu')
+                    y_cpu = y.to('cpu')
+                    alpvec0_cpu = alpvec[0].to('cpu')
+                obj_value = self.objfun(alpvec0_cpu, aka_cpu, ka_cpu, y_cpu, al, nobs)
                 # eps_float64 = np.finfo(np.float64).eps
                 # optimal_intercept = minimize_scalar(self.objfun, args=(aka, ka, y, al, nobs), bracket=(-100.0, 100.0), method="brent")
                 # obj_value_new = self.objfun(optimal_intercept.x, aka, ka, y, al, nobs)
-                golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka, aka, y, al)
+                golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka_cpu, aka_cpu, y_cpu, al)
                 int_new = golden_s[0]
                 obj_value_new = golden_s[1]
                 if obj_value_new < obj_value:
@@ -276,12 +351,18 @@ class cvksvm:
                                 for _ in range(self.maxit):
                                     ka = torch.mv(Kmat, alptmp[1:])
                                     aKa = torch.dot(ka, alptmp[1:])
-                                    obj_value = self.objfun(alptmp[0], aka, ka, y, al, nobs)
+                                    if self.device == 'cuda':
+                                        ka_cpu = ka.to('cpu')
+                                        aka_cpu = aka.to('cpu')
+                                        y_cpu = y.to('cpu')
+                                        alptmp0_cpu = alptmp[0].to('cpu')
+                                    obj_value = self.objfun(alptmp0_cpu, aka_cpu, ka_cpu, y_cpu, al, nobs)
 
+                                    
                                     # Optimize intercept
                                     # optimal_intercept = minimize_scalar(self.objfun, args=(aka, ka, y, al, nobs), bracket=(-100.0, 100.0), method = 'brent')
                                     # obj_value_new = self.objfun(optimal_intercept.x, aka, ka, y, al, nobs)
-                                    golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka, aka, y, al)
+                                    golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka_cpu, aka_cpu, y_cpu, al)
                                     int_new = golden_s[0]
                                     obj_value_new = golden_s[1]
                                     if obj_value_new < obj_value:
@@ -435,10 +516,17 @@ class cvksvm:
 
                     ka = torch.mv(Kmat, looalp[1:])
                     aka = torch.dot(ka, looalp[1:])
-                    obj_value = self.objfun(looalp[0], aka, ka, yn, al, nobs)
+
+                    if self.device == 'cuda':
+                        ka_cpu = ka.to('cpu')
+                        aka_cpu = aka.to('cpu')
+                        yn_cpu = yn.to('cpu')
+                        looalp0_cpu = looalp[0].to('cpu')
+
+                    obj_value = self.objfun(looalp0_cpu, aka_cpu, ka_cpu, yn_cpu, al, nobs)
                     # optimal_intercept = minimize_scalar(self.objfun, args=(aka, ka, yn, al, nobs), bracket=(-100.0, 100.0), method="brent")
                     # obj_value_new = self.objfun(optimal_intercept.x, aka, ka, yn, al, nobs)
-                    golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka, aka, yn, al)
+                    golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka_cpu, aka_cpu, yn_cpu, al)
                     int_new = golden_s[0]
                     obj_value_new = golden_s[1]
                     if obj_value_new < obj_value:
@@ -483,10 +571,17 @@ class cvksvm:
                                 for _ in range(self.maxit):
                                     ka = torch.mv(Kmat, alptmp[1:])
                                     aKa = torch.dot(ka, alptmp[1:])
-                                    obj_value = self.objfun(alptmp[0], aka, ka, yn, al, nobs)
+
+                                    if self.device == 'cuda':
+                                        ka_cpu = ka.to('cpu')
+                                        aka_cpu = aka.to('cpu')
+                                        yn_cpu = yn.to('cpu')
+                                        alptmp0_cpu = alptmp[0].to('cpu')
+
+                                    obj_value = self.objfun(alptmp0_cpu, aka_cpu, ka_cpu, yn_cpu, al, nobs)
 
                                     # Optimize intercept
-                                    golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka, aka, yn, al)
+                                    golden_s = self.golden_section_search(-100.0, 100.0, nobs, ka_cpu, aka_cpu, yn_cpu, al)
                                     int_new = golden_s[0]
                                     obj_value_new = golden_s[1]
                                     if obj_value_new < obj_value:
