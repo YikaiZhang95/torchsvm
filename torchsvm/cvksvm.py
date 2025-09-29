@@ -308,6 +308,12 @@ class cvksvm:
                     aka_cpu = aka.to('cpu')
                     y_cpu = y.to('cpu')
                     alpvec0_cpu = alpvec[0].to('cpu')
+                else:
+                    ka_cpu = ka
+                    aka_cpu = aka
+                    y_cpu = y
+                    alpvec0_cpu = alpvec[0]
+                    
                 obj_value = self.objfun(alpvec0_cpu, aka_cpu, ka_cpu, y_cpu, al, nobs)
                 # eps_float64 = np.finfo(np.float64).eps
                 # optimal_intercept = minimize_scalar(self.objfun, args=(aka, ka, y, al, nobs), bracket=(-100.0, 100.0), method="brent")
@@ -522,6 +528,12 @@ class cvksvm:
                         aka_cpu = aka.to('cpu')
                         yn_cpu = yn.to('cpu')
                         looalp0_cpu = looalp[0].to('cpu')
+                    else:
+                        ka_cpu = ka
+                        aka_cpu = aka
+                        yn_cpu = yn
+                        looalp0_cpu = looalp[0]
+                        
 
                     obj_value = self.objfun(looalp0_cpu, aka_cpu, ka_cpu, yn_cpu, al, nobs)
                     # optimal_intercept = minimize_scalar(self.objfun, args=(aka, ka, yn, al, nobs), bracket=(-100.0, 100.0), method="brent")
@@ -577,6 +589,12 @@ class cvksvm:
                                         aka_cpu = aka.to('cpu')
                                         yn_cpu = yn.to('cpu')
                                         alptmp0_cpu = alptmp[0].to('cpu')
+                                    else:
+                                        ka_cpu = ka
+                                        aka_cpu = aka
+                                        yn_cpu = yn
+                                        alptmp0_cpu = alptmp[0]
+                                        
 
                                     obj_value = self.objfun(alptmp0_cpu, aka_cpu, ka_cpu, yn_cpu, al, nobs)
 
