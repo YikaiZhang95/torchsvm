@@ -93,7 +93,7 @@ Kmat = rbf_kernel(X_train, sig)
 `torchsvm` mainly provides `cvksvm` to tune kernel SVM fast with GPU acceleration and compute exact leave-one-out cross-validation (LOOCV) errors if needed.
 
 ```python
-model = cvksvm(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, foldid=foldid, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
+model = cvksvm(Kmat=Kmat, y=y_train, nlam=nlam, ulam=ulam, nfolds=5, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
 model.fit()
 ```
 
