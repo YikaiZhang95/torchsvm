@@ -122,6 +122,26 @@ ypred = torch.where(result > 0, torch.tensor(1), torch.tensor(-1))
 torch.mean((ypred == y_test).float())
 ```
 
+### Probability estimation
+```python
+### Platt scaling
+oof_f = torch.where(model.pred > 0, 1, -1).to(device = 'cpu')[:, best_ind]
+platt = platt.PlattScalerTorch(dtype=torch.double, device='cuda').fit(oof_f, y_train)
+
+X_test_raw = torch.mv(Kmat_new, alpmat[1:,best_ind]) + alpmat[0, best_ind]
+
+with torch.no_grad():
+    p_platt = platt.predict_proba(X_test_raw)[:, 1].cpu().numpy()
+    y_test_np = torch.as_tensor(y_test).cpu().numpy()
+
+# Reliability data for Platt
+bc, mp, fp, cnt = platt.reliability_curve(y_test_np, p_platt, n_bins=15)
+ece_platt  = platt.expected_calibration_error(mp, fp, cnt)
+brier_platt = platt.brier_score(y_test_np, p_platt)
+
+platt.plot_calibration(bc, mp, fp, cnt, label=f"Platt (ECE={ece_platt:.3f}, Brier={brier_platt:.3f})")
+```
+
 ### Real data
 
 `torchsvm` works well with `sklearn` datasets. We need to convert these datasets to `torch.tensor` with $y=1 \text{ or} -1$.
@@ -142,6 +162,7 @@ Kmat = rbf_kernel(X, sig)
 model = cvksvm(Kmat=Kmat, y=y, nlam=nlam, ulam=ulam, nfolds=nfolds, eps=1e-5, maxit=1000, gamma=1e-8, is_exact=0, device='cuda')
 model.fit()
 ```
+
 
 ### Extensions to large-margin classifiers 
 It also provides applications for other large-margin classifiers:
