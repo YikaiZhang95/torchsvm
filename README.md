@@ -141,6 +141,7 @@ brier_platt = platt.brier_score(y_test_np, p_platt)
 
 platt.plot_calibration(bc, mp, fp, cnt, label=f"Platt (ECE={ece_platt:.3f}, Brier={brier_platt:.3f})")
 ```
+![Platt scaling](https://github.com/YikaiZhang95/torchsvm/assets/image.png)
 
 ### Real data
 
